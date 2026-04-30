@@ -84,6 +84,6 @@ jobs:
                   print(f"AD {ad} failed: {e.code} - {e.message}")
                   time.sleep(2)
 
-          print("All ADs full, will retry in 5 minutes.")
+          print("All ADs full, will retry in 1 minute.")
           sys.exit(0)
           EOF
