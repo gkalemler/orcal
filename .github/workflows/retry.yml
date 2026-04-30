@@ -2,7 +2,7 @@ name: Oracle A1 Instance Retry
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '* * * * *'
   workflow_dispatch:
 
 jobs:
