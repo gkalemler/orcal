@@ -1,0 +1,89 @@
+name: Oracle A1 Instance Retry
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: OCI_USER
+
+    steps:
+      - name: Install OCI SDK
+        run: pip install oci
+
+      - name: Try create A1 instance
+        env:
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+        run: |
+          python3 << 'EOF'
+          import oci, os, sys, tempfile, time
+
+          private_key = os.environ["OCI_PRIVATE_KEY"]
+          with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as f:
+              f.write(private_key)
+              key_file = f.name
+
+          config = {
+              "user": os.environ["OCI_USER"],
+              "fingerprint": os.environ["OCI_FINGERPRINT"],
+              "tenancy": os.environ["OCI_TENANCY"],
+              "region": "eu-frankfurt-1",
+              "key_file": key_file,
+          }
+
+          oci.config.validate_config(config)
+          compute = oci.core.ComputeClient(config)
+
+          tenancy_id = config["tenancy"]
+          image_id = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaafa6df4ne6anvdzb5k5gqz6veykx2pmu7padzkxzy4ognjhty7pma"
+          subnet_id = "ocid1.subnet.oc1.eu-frankfurt-1.aaaaaaaafzfch7fv4cly5buoio24g7a3ywowgeclpphcmo35327mcjlffnmq"
+          ssh_key = os.environ["OCI_SSH_PUBLIC_KEY"]
+
+          ads = [
+              "KMBq:EU-FRANKFURT-1-AD-1",
+              "KMBq:EU-FRANKFURT-1-AD-2",
+              "KMBq:EU-FRANKFURT-1-AD-3",
+          ]
+
+          for ad in ads:
+              print(f"Trying AD: {ad}")
+              try:
+                  details = oci.core.models.LaunchInstanceDetails(
+                      compartment_id=tenancy_id,
+                      availability_domain=ad,
+                      display_name="a1-instance",
+                      shape="VM.Standard.A1.Flex",
+                      shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+                          ocpus=4,
+                          memory_in_gbs=24,
+                      ),
+                      source_details=oci.core.models.InstanceSourceViaImageDetails(
+                          image_id=image_id,
+                          source_type="image",
+                          boot_volume_size_in_gbs=100,
+                      ),
+                      create_vnic_details=oci.core.models.CreateVnicDetails(
+                          subnet_id=subnet_id,
+                          assign_public_ip=True,
+                      ),
+                      metadata={"ssh_authorized_keys": ssh_key},
+                  )
+                  result = compute.launch_instance(details)
+                  print(f"SUCCESS! Instance ID: {result.data.id}")
+                  print(f"State: {result.data.lifecycle_state}")
+                  sys.exit(0)
+              except oci.exceptions.ServiceError as e:
+                  print(f"AD {ad} failed: {e.code} - {e.message}")
+                  time.sleep(2)
+
+          print("All ADs full, will retry in 5 minutes.")
+          sys.exit(0)
+          EOF
